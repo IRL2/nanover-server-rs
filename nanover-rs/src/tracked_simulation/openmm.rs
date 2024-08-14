@@ -161,7 +161,6 @@ impl TrackedSimulation for TrackedOpenMMSimulation {
     ) -> Result<(), BroadcastSendError> {
         let mut frame = self.simulation.to_framedata(with_velocities, with_forces);
         let energy_total = self.user_energies();
-        let potential_energy = self.simulation.get_potential_energy();
         frame
             .insert_number_value("energy.user.total", energy_total)
             .unwrap();

@@ -654,7 +654,6 @@ impl ToFrameData for OpenMMSimulation {
 
             potential_energy = OpenMM_State_getPotentialEnergy(state);
             kinetic_energy = OpenMM_State_getKineticEnergy(state);
-            total_energy = potential_energy + kinetic_energy;
 
             time = OpenMM_State_getTime(state);
 
@@ -723,9 +722,6 @@ impl ToFrameData for OpenMMSimulation {
             .insert_number_value("energy.kinetic", kinetic_energy)
             .unwrap();
         frame
-            .insert_number_value("energy.total", total_energy)
-            .unwrap();
-        frame
             .insert_number_value("system.simulation.time", time)
             .unwrap();
         frame
@@ -743,7 +739,7 @@ impl ToFrameData for OpenMMSimulation {
                 .unwrap();
         }
         if with_forces {
-            frame.insert_float_array("particle.forces", forces).unwrap();
+            frame.insert_float_array("particle.forces.system", forces).unwrap();
         }
 
         frame

@@ -739,7 +739,9 @@ impl ToFrameData for OpenMMSimulation {
                 .unwrap();
         }
         if with_forces {
-            frame.insert_float_array("particle.forces.system", forces).unwrap();
+            frame
+                .insert_float_array("particle.forces.system", forces)
+                .unwrap();
         }
 
         frame

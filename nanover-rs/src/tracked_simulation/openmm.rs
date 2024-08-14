@@ -168,12 +168,6 @@ impl TrackedSimulation for TrackedOpenMMSimulation {
         frame
             .insert_number_value("system.reset.counter", self.reset_counter as f64)
             .unwrap();
-        frame
-            .insert_number_value(
-                "energy.potential_corrected",
-                potential_energy + potential_energy_correction,
-            )
-            .unwrap();
         add_force_map_to_frame(self.user_forces(), &mut frame);
         let mut source = sim_clone.lock().unwrap();
         source.send_frame(frame)

@@ -638,7 +638,6 @@ impl ToFrameData for OpenMMSimulation {
         let mut box_vectors = Vec::<f32>::new();
         let potential_energy;
         let kinetic_energy;
-        let total_energy;
         let time;
 
         let mut state_options = OpenMM_State_DataType_OpenMM_State_Positions

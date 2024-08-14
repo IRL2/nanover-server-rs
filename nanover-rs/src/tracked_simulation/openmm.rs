@@ -161,24 +161,11 @@ impl TrackedSimulation for TrackedOpenMMSimulation {
     ) -> Result<(), BroadcastSendError> {
         let mut frame = self.simulation.to_framedata(with_velocities, with_forces);
         let energy_total = self.user_energies();
-        // It would be better to simply amend the potential energy in the frame. This would avoid
-        // having to retrieve it again from the OpenMM state again (as below) and writing the
-        // corrected potential energy to the frame in a new field (energy.potential_corrected)
-        // TODO: Add functionality to amend values of fields in FrameData
-        let potential_energy = self.simulation.get_potential_energy();
-        let potential_energy_correction =
-            compute_potential_energy_correction(self.user_forces(), &self.simulation);
         frame
             .insert_number_value("energy.user.total", energy_total)
             .unwrap();
         frame
             .insert_number_value("system.reset.counter", self.reset_counter as f64)
-            .unwrap();
-        frame
-            .insert_number_value(
-                "energy.potential_corrected",
-                potential_energy + potential_energy_correction,
-            )
             .unwrap();
         add_force_map_to_frame(self.user_forces(), &mut frame);
         let mut source = sim_clone.lock().unwrap();
@@ -245,27 +232,4 @@ fn add_force_map_to_frame(force_map: &CoordMap, frame: &mut FrameData) {
     frame
         .insert_float_array("forces.user.sparse", sparse)
         .unwrap();
-}
-
-// Currently, this function has to retrieve the positions of the atoms with which the user is
-// interacting from OpenMM in a way that is separate to what is currently happening for the frame.
-// It would be good to think of a way to avoid doing this, as this information must already be
-// accessed to calculate the forces from the interactions.
-// TODO: Investigate whether this function can be reworked to avoid retrieving the positions from
-//       the OpenMM state again here
-fn compute_potential_energy_correction(force_map: &CoordMap, simulation: &OpenMMSimulation) -> f64 {
-    unsafe {
-        let selection = force_map.keys().map(|value| *value as i32).collect();
-        let positions = simulation.get_selected_positions(&selection);
-        let mut energy_correction = 0.0;
-
-        for particle in force_map.keys() {
-            let pos = positions[particle];
-            let force = force_map[particle];
-            energy_correction =
-                energy_correction + force[0] * pos[0] + force[1] * pos[1] + force[2] * pos[2]
-        }
-
-        energy_correction
-    }
 }

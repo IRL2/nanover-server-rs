@@ -23,7 +23,7 @@ use openmm_sys::{
     OpenMM_System_getParticleMass, OpenMM_Vec3, OpenMM_Vec3Array, OpenMM_Vec3Array_create,
     OpenMM_Vec3Array_destroy, OpenMM_Vec3Array_get, OpenMM_Vec3Array_getSize, OpenMM_Vec3Array_set,
     OpenMM_Vec3_scale, OpenMM_XmlSerializer_deserializeIntegrator,
-    OpenMM_XmlSerializer_deserializeSystem,
+    OpenMM_XmlSerializer_deserializeState, OpenMM_XmlSerializer_deserializeSystem,
 };
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::Reader;
@@ -133,6 +133,7 @@ pub trait IMD {
 enum XMLTarget {
     System,
     Integrator,
+    State,
 }
 
 impl TryFrom<&[u8]> for XMLTarget {
@@ -142,6 +143,7 @@ impl TryFrom<&[u8]> for XMLTarget {
         match value {
             b"System" => Ok(Self::System),
             b"Integrator" => Ok(Self::Integrator),
+            b"State" => Ok(Self::State),
             _ => Err(()),
         }
     }
@@ -164,6 +166,7 @@ enum StructureType {
 struct PreSimulation {
     structure: Vec<u8>,
     system: Writer<Cursor<Vec<u8>>>,
+    state: Writer<Cursor<Vec<u8>>>,
     integrator: Writer<Cursor<Vec<u8>>>,
     structure_type: StructureType,
 }
@@ -173,6 +176,7 @@ impl PreSimulation {
         PreSimulation {
             structure: vec![],
             system: Writer::new(Cursor::new(Vec::new())),
+            state: Writer::new(Cursor::new(Vec::new())),
             integrator: Writer::new(Cursor::new(Vec::new())),
             structure_type: StructureType::None,
         }
@@ -220,12 +224,22 @@ impl PreSimulation {
         writer.write_event(Event::Eof).unwrap();
     }
 
-    pub fn finish(self) -> Result<(CString, CString, MolecularSystem), XMLParsingError> {
+    pub fn finish(
+        self,
+    ) -> Result<(CString, CString, Option<CString>, MolecularSystem), XMLParsingError> {
         let system_content =
             CString::new(str::from_utf8(&self.system.into_inner().into_inner()).unwrap()).unwrap();
         let integrator_content =
             CString::new(str::from_utf8(&self.integrator.into_inner().into_inner()).unwrap())
                 .unwrap();
+        let binding = self.state.into_inner().into_inner();
+        let state_maybe_content = str::from_utf8(&binding).unwrap();
+        let state_content = if state_maybe_content.is_empty() {
+            None
+        } else {
+            Some(CString::new(state_maybe_content).unwrap())
+        };
+
         let structure = match self.structure_type {
             StructureType::None => return Err(XMLParsingError::NoStructureFound),
             StructureType::Pdb => {
@@ -237,13 +251,14 @@ impl PreSimulation {
                 read_cif(input).map_err(XMLParsingError::PDBxReadError)?
             }
         };
-        Ok((system_content, integrator_content, structure))
+        Ok((system_content, integrator_content, state_content, structure))
     }
 
     fn choose_writer(&mut self, target: &XMLTarget) -> &mut Writer<Cursor<Vec<u8>>> {
         match target {
             XMLTarget::System => &mut self.system,
             XMLTarget::Integrator => &mut self.integrator,
+            XMLTarget::State => &mut self.state,
         }
     }
 }
@@ -305,6 +320,8 @@ impl OpenMMSimulation {
         let mut read_state = ReadState::Unstarted;
         let mut sim_builder = PreSimulation::new();
 
+        let tags_to_copy_as_xml = [QName(b"System"), QName(b"Integrator"), QName(b"State")];
+
         loop {
             read_state = match (read_state, reader.read_event_into(&mut buf)) {
                 // Start
@@ -334,20 +351,22 @@ impl OpenMMSimulation {
                     ReadState::CopyStructure
                 }
 
-                // System and Integrator XML
+                // System, Integrator, and State XML
                 (ReadState::Ignore, Ok(Event::Start(ref e)))
-                    if e.name() == QName(b"System") || e.name() == QName(b"Integrator") =>
+                    if tags_to_copy_as_xml.contains(&e.name()) =>
                 {
                     let target = e.name().into_inner().try_into().unwrap();
+                    trace!("Start {target:?}");
                     sim_builder.start_xml_element(&target, e);
                     ReadState::CopyXML(target)
                 }
                 (ReadState::Ignore, Ok(Event::Empty(ref e)))
-                    if e.name() == QName(b"System") || e.name() == QName(b"Integrator") =>
+                    if tags_to_copy_as_xml.contains(&e.name()) =>
                 {
                     let target = e.name().into_inner().try_into().unwrap();
+                    trace!("Empty {target:?}");
                     sim_builder.empty_xml_element(&target, e);
-                    ReadState::CopyXML(target)
+                    ReadState::Ignore
                 }
                 (ReadState::CopyXML(target), Ok(Event::Start(ref e))) => {
                     sim_builder.start_xml_element(&target, e);
@@ -355,7 +374,8 @@ impl OpenMMSimulation {
                 }
                 (ReadState::CopyXML(target), Ok(Event::End(ref e))) => {
                     sim_builder.end_xml_element(&target, e);
-                    if e.name() == QName(b"System") || e.name() == QName(b"Integrator") {
+                    if tags_to_copy_as_xml.contains(&e.name()) {
+                        trace!("End {target:?}");
                         sim_builder.close_xml(&target);
                         ReadState::Ignore
                     } else {
@@ -368,6 +388,11 @@ impl OpenMMSimulation {
                 }
 
                 // End
+                (ReadState::Ignore, Ok(Event::End(ref e)))
+                    if e.name() == QName(b"OpenMMSimulation") =>
+                {
+                    ReadState::Ignore
+                }
                 (_, Ok(Event::Eof)) => break,
                 (_, Err(e)) => return Err(XMLParsingError::XMLError(e, reader.buffer_position())),
                 (state, Ok(event)) => {
@@ -379,7 +404,8 @@ impl OpenMMSimulation {
             }
         }
 
-        let (system_content, integrator_content, structure) = sim_builder.finish()?;
+        let (system_content, integrator_content, state_content, structure) =
+            sim_builder.finish()?;
 
         let n_atoms = structure.atom_count();
         debug!("Particles in the structure: {n_atoms}");
@@ -448,6 +474,12 @@ impl OpenMMSimulation {
             debug!("Integrator read");
             let context = OpenMM_Context_create(system, integrator);
             OpenMM_Context_setPositions(context, init_pos);
+
+            if let Some(read_state) = state_content {
+                debug!("Setting the initial state from the XML.");
+                let openmm_state = OpenMM_XmlSerializer_deserializeState(read_state.as_ptr());
+                OpenMM_Context_setState(context, openmm_state);
+            }
 
             let initial_state = OpenMM_Context_getState(
                 context,

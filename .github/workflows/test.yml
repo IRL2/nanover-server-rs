@@ -217,7 +217,7 @@ jobs:
           auto-update-conda: true
           miniforge-version: latest
       - name: Install CUDA
-        run: conda install -y cudatoolkit-dev
+        run: conda install -y distutils cudatoolkit-dev
       - name: Generate the build
         shell: bash -el {0}
         run: |

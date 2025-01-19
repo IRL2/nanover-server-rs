@@ -217,7 +217,8 @@ jobs:
           auto-update-conda: true
           miniforge-version: latest
       - name: Install CUDA
-        run: conda install -y cudatoolkit-dev
+        uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda-toolkit
       - name: Generate the build
         shell: bash -el {0}
         run: |

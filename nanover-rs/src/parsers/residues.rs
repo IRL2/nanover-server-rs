@@ -52,7 +52,7 @@ pub struct ResidueView<'a> {
     pub next_index: usize,
 }
 
-impl<'a> ResidueView<'a> {
+impl ResidueView<'_> {
     pub fn find_atom_position(&self, name: &str) -> Option<usize> {
         self.system.names[self.start_index..self.next_index]
             .iter()

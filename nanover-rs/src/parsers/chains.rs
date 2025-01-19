@@ -7,7 +7,7 @@ pub struct ChainView<'a> {
     pub next_index: usize,
 }
 
-impl<'a> ChainView<'a> {
+impl ChainView<'_> {
     pub fn iter_residues(&self) -> ResidueIterator {
         ResidueIterator::new(self.system, self.start_index, self.next_index)
     }
